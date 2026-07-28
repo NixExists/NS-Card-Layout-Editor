@@ -3,7 +3,7 @@
 // @match        https://www.nationstates.net/*page=deck*
 // @description  Allows you to configure the amount and size of displayed cards. This is still in beta and can be very buggy.
 // @author       Tekkhu
-// @version      0.1
+// @version      0.2
 // @license      MIT
 // ==/UserScript==
 
