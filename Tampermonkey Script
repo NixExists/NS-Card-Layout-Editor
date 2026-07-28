@@ -156,7 +156,9 @@
         }
     `;
     }
-
+    function sleep(ms) {
+        return new Promise(resolve => setTimeout(resolve, ms));
+    }
     async function loadExtraCards() {
         const deckList = document.querySelector(".decklist");
 
@@ -169,29 +171,34 @@
         const currentStart = Number(currentURL.searchParams.get("start")) || 0;
 
         for (let i = 1; i <= extraPages; i++) {
-            const nextStart = currentStart + (i * 30);
+        const nextStart = currentStart + (i * 30);
 
-            currentURL.searchParams.set("start", nextStart);
+        currentURL.searchParams.set("start", nextStart);
 
-            try {
-                const response = await fetch(currentURL.href);
-                const html = await response.text();
+        try {
+            const response = await fetch(currentURL.href);
+            const html = await response.text();
 
-                const parser = new DOMParser();
-                const doc = parser.parseFromString(html, "text/html");
+            const parser = new DOMParser();
+            const doc = parser.parseFromString(html, "text/html");
 
-                const newCards = doc.querySelectorAll(".deckcard-container");
+            const newCards = doc.querySelectorAll(".deckcard-container");
 
-                console.log(`Loaded ${newCards.length} cards from start=${nextStart}`);
+            console.log(`Loaded ${newCards.length} cards from start=${nextStart}`);
 
-                newCards.forEach(card => {
-                    deckList.appendChild(card);
-                });
+            newCards.forEach(card => {
+                deckList.appendChild(card);
+            });
 
-            } catch (error) {
-                console.error(`Failed loading page ${nextStart}:`, error);
-            }
+        } catch (error) {
+            console.error(`Failed loading page ${nextStart}:`, error);
         }
+
+        // Wait 6 seconds before requesting the next page
+        if (i < extraPages) {
+            await sleep(6000);
+        }
+    }
 
         console.log("Finished loading extra cards.");
     }
@@ -270,7 +277,7 @@
         pagesLabel.style.color = "black";
         pagesLabel.style.textAlign = "left";
         pagesLabel.style.margin = "0 0 5px 0";
-        pagesLabel.textContent = "Extra Pages (30 cards per page): ";
+        pagesLabel.textContent = "Extra Pages (30 cards per page, each additional page after one takes 6s to fetch per NS rules): ";
 
         const pagesInput = document.createElement("input");
         pagesInput.type = "number";
