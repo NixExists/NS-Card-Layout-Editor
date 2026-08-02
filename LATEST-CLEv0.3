@@ -1,9 +1,10 @@
 // ==UserScript==
-// @name         NSCardLayoutEditor
+// @name         NSCLE|CardLayoutEditor
 // @match        https://www.nationstates.net/*page=deck*
-// @description  Allows you to configure the amount and size of displayed cards. This is still in beta and can be very buggy.
+// @exclude      *card=*
+// @description  Allows you to edit the layout of displayed cards. This is still in beta and can be quite buggy.
 // @author       Tekkhu
-// @version      0.2
+// @version      0.3
 // @license      MIT
 // ==/UserScript==
 
@@ -11,10 +12,15 @@
     'use strict';
     let nheight = Number(localStorage.getItem("cardHeight")) || 400;
     let extraPages = Number(localStorage.getItem("extraPages")) || 0;
+    let nmargin = Number(localStorage.getItem("cardMargin")) || 0;
+    let mainDeckList = null;
+    let pagesLoadedText = null;
+    let nextStart = 0;
+    let pagesLoaded = 0;
     const style = document.createElement("style");
     document.head.appendChild(style);
     //Adjust every cards' measurements
-    function applyCardSizing(nheight) {
+    function applyCardSizing(nheight, cardMargin) {
         const nwidth = nheight*.7
         const nfontsize = 10/(400/nheight)
         const nmottofs = 14/(400/nheight)
@@ -31,7 +37,7 @@
         .deckcard-container {
             width: ${nwidth}px !important;
             height: ${nheight}px !important;
-            margin: 0 !important;
+            margin: ${cardMargin}px !important;
         }
         .deckcard {
             width: ${nwidth}px !important;
@@ -159,21 +165,38 @@
     function sleep(ms) {
         return new Promise(resolve => setTimeout(resolve, ms));
     }
-    async function loadExtraCards() {
-        const deckList = document.querySelector(".decklist");
+    function initializeDeckList() {
+        const deckLists = document.querySelectorAll(".decklist");
 
-        if (!deckList) {
+        if (deckLists.length === 0) {
             console.log("Deck list not found.");
-            return;
+            return false;
         }
 
+        // Use the first decklist as the main one
+        mainDeckList = deckLists[0];
+
+        // Merge any additional decklists into the first
+        for (let i = 1; i < deckLists.length; i++) {
+            const cards = deckLists[i].querySelectorAll(".deckcard-container");
+
+            cards.forEach(card => {
+                mainDeckList.appendChild(card);
+            });
+
+            deckLists[i].remove();
+        }
+
+        console.log("Deck list initialized.");
+
+        return true;
+    }
+    function updatePagesLoadedText() {
+            pagesLoadedText.textContent =`Pages Loaded: ${pagesLoaded}/${extraPages}`;
+        }
+    async function loadOnePage(start) {
         const currentURL = new URL(window.location.href);
-        const currentStart = Number(currentURL.searchParams.get("start")) || 0;
-
-        for (let i = 1; i <= extraPages; i++) {
-        const nextStart = currentStart + (i * 30);
-
-        currentURL.searchParams.set("start", nextStart);
+        currentURL.searchParams.set("start", start);
 
         try {
             const response = await fetch(currentURL.href);
@@ -184,23 +207,76 @@
 
             const newCards = doc.querySelectorAll(".deckcard-container");
 
-            console.log(`Loaded ${newCards.length} cards from start=${nextStart}`);
+            console.log(`Loaded ${newCards.length} cards from start=${start}`);
 
             newCards.forEach(card => {
-                deckList.appendChild(card);
+                mainDeckList.appendChild(card);
+
+                $(card).find(".deckcard-info").on("click", function () {
+                    if (!$(this).parents(".deckcard.flipped").length) {
+                        $(this).toggleClass("show");
+                        document.getSelection().removeAllRanges();
+                    }
+                });
             });
 
-        } catch (error) {
-            console.error(`Failed loading page ${nextStart}:`, error);
-        }
+            return true;
 
-        // Wait 6 seconds before requesting the next page
-        if (i < extraPages) {
-            await sleep(6000);
+        } catch (error) {
+            console.error(`Failed loading page ${start}:`, error);
+            return false;
+        }
+    }
+    function removeExtraCards() {
+        while (pagesLoaded > 0) {
+            for (let i = 0; i < 30; i++) {
+                const lastCard = mainDeckList.lastElementChild;
+                if (lastCard) {
+                    lastCard.remove();
+                }
+            }
+
+            pagesLoaded--;
+            nextStart -= 30;
+            updatePagesLoadedText();
         }
     }
 
+    //automatic load
+    async function loadExtraCards(pagesToLoad) {
+        for (let i = 0; i < pagesToLoad; i++) {
+            const success = await loadOnePage(nextStart);
+
+            if (!success) break;
+
+            pagesLoaded++;
+            nextStart += 30;
+            updatePagesLoadedText();
+            if (i + 1 < pagesToLoad) {
+                await sleep(6000);
+            }
+        }
         console.log("Finished loading extra cards.");
+    }
+    //manual load
+    async function loadNextPage() {
+        if (pagesLoaded >= extraPages) {
+            console.log("All requested pages have already been loaded.");
+            return;
+        }
+
+        const success = await loadOnePage(nextStart);
+
+        if (!success) {
+            return;
+        }
+
+        pagesLoaded++;
+        nextStart += 30;
+        updatePagesLoadedText();
+        console.log(
+            `Loaded ${pagesLoaded} of ${extraPages} extra pages.`
+        );
     }
     function menusetup() {
         //settings button
@@ -226,7 +302,7 @@
         menu.style.right = "50px";
         menu.style.background = "white";
         menu.style.border = "1px solid black";
-        menu.style.width = "160px";
+        menu.style.width = "220px";
         menu.style.minHeight = "40px";
         menu.style.padding = "5px";
         menu.style.fontSize = "16px";
@@ -257,7 +333,7 @@
         heightLabel.style.color = "black";
         heightLabel.style.textAlign = "left";
         heightLabel.style.margin = "0 0 5px 0";
-        heightLabel.textContent = "Card height (px): ";
+        heightLabel.textContent = "Card Height (px): ";
 
         const heightInput = document.createElement("input");
         heightInput.type = "number";
@@ -277,18 +353,91 @@
         pagesLabel.style.color = "black";
         pagesLabel.style.textAlign = "left";
         pagesLabel.style.margin = "0 0 5px 0";
-        pagesLabel.textContent = "Extra Pages (30 cards per page, each additional page after one takes 6s to fetch per NS rules): ";
-
+        pagesLabel.textContent = "Extra Pages: ";
         const pagesInput = document.createElement("input");
         pagesInput.type = "number";
         pagesInput.value = extraPages;
         pagesInput.min = 0;
         pagesInput.max = 40;
-
         pagesLabel.appendChild(pagesInput);
         menu.appendChild(pagesLabel);
+        // Loading mode title
+        const loadingTitle = document.createElement("div");
+        loadingTitle.textContent = "Mode:";
+        loadingTitle.style.marginTop = "10px";
+        loadingTitle.style.color = "black";
+        menu.appendChild(loadingTitle);
 
+        // Automatic mode UI
+        const autoLabel = document.createElement("label");
+        autoLabel.style.color = "black";
+        const autoRadio = document.createElement("input");
+        autoRadio.type = "radio";
+        autoRadio.name = "loadingMode";
+        autoRadio.value = "auto";
+        autoRadio.checked = true;
+        autoRadio.style.color = "black";
 
+        autoLabel.appendChild(autoRadio);
+        autoLabel.append(" Automatic");
+
+        menu.appendChild(autoLabel);
+        menu.appendChild(document.createElement("br"));
+
+        // Manual mode UI
+        const manualLabel = document.createElement("label");
+        manualLabel.style.color = "black";
+        const manualRadio = document.createElement("input");
+        manualRadio.type = "radio";
+        manualRadio.name = "loadingMode";
+        manualRadio.value = "manual";
+        manualRadio.style.color = "black";
+
+        manualLabel.appendChild(manualRadio);
+        manualLabel.append(" Manual");
+
+        menu.appendChild(manualLabel);
+
+        menu.appendChild(document.createElement("br"));
+
+        // Load next page button
+        const loadNextButton = document.createElement("button");
+        loadNextButton.textContent = "Load Next Page";
+        loadNextButton.disabled = true;
+
+        menu.appendChild(loadNextButton);
+        //listeners
+        autoRadio.onchange = () => {
+            loadNextButton.disabled = true;
+        };
+
+        manualRadio.onchange = () => {
+            loadNextButton.disabled = false;
+        };
+        //Pages loaded out of target indicator
+        pagesLoadedText = document.createElement("div");
+        pagesLoadedText.style.marginTop = "8px";
+        pagesLoadedText.style.color = "black";
+        pagesLoadedText.style.fontSize = "14px";
+        pagesLoadedText.textContent = `Pages Loaded: ${pagesLoaded}/${extraPages}`;
+
+        menu.appendChild(pagesLoadedText);
+        //Margin field
+        const marginLabel = document.createElement("div");
+        marginLabel.style.fontSize = "16px";
+        marginLabel.style.color = "black";
+        marginLabel.style.textAlign = "left";
+        marginLabel.style.margin = "0 0 5px 0";
+        marginLabel.textContent = "Card Margin (px): ";
+
+        const marginInput = document.createElement("input");
+        marginInput.type = "number";
+        marginInput.value = nmargin;
+        marginInput.min = 0;
+        marginInput.max = 20;
+
+        marginLabel.appendChild(marginInput);
+        menu.appendChild(marginLabel);
 
 
         // Apply button
@@ -296,32 +445,58 @@
         applyButton.textContent = "Apply";
 
         menu.appendChild(applyButton);
-
+        //Credits
+        const creditsText = document.createElement("div");
+        creditsText.textContent = "Script by Tekkhu";
+        creditsText.style.fontSize = "10px";
+        creditsText.style.fontStyle = "italic";
+        creditsText.style.color = "grey";
+        creditsText.style.textAlign = "right";
+        creditsText.style.margin = "0 0 5px 0";
+        menu.appendChild(creditsText);
 
         // Apply behavior
         applyButton.onclick = () => {
             const newHeight = Number(heightInput.value);
             const newPages = Number(pagesInput.value);
-
+            const newMargin = Number(marginInput.value);
+            if (newMargin >= 0) {
+                nmargin = newMargin;
+            }
             if (newHeight > 0) {
                 nheight = newHeight;
             }
-
+            applyCardSizing(nheight, nmargin);
             if (newPages >= 0) {
                 extraPages = newPages;
+                updatePagesLoadedText();
             }
-
+            updatePagesLoadedText();
+            const difference = extraPages - pagesLoaded;
             localStorage.setItem("cardHeight", nheight);
             localStorage.setItem("extraPages", extraPages);
-
+            localStorage.setItem("cardMargin", nmargin);
             console.log(
                 `Applied settings: height=${nheight}, extra pages=${extraPages}`
             );
 
-            location.reload();
+
+            if (difference > 0) {
+                if (autoRadio.checked) {
+                    loadExtraCards(difference);
+                }
+            } else if (difference < 0) {
+                removeExtraCards(-difference);
+            }
+        }
+        //Manual button behaivor
+        loadNextButton.onclick = () => {
+            loadNextPage();
         };
     }
     menusetup();
-    applyCardSizing(nheight);
-    loadExtraCards();
+    initializeDeckList();
+    nextStart =(Number(new URL(window.location.href).searchParams.get("start")) || 0)+ 30;
+    applyCardSizing(nheight, nmargin);
+
 })();
