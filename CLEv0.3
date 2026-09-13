@@ -1,0 +1,502 @@
+// ==UserScript==
+// @name         NSCLE|CardLayoutEditor
+// @match        https://www.nationstates.net/*page=deck*
+// @exclude      *card=*
+// @description  Allows you to edit the layout of displayed cards. This is still in beta and can be quite buggy.
+// @author       Tekkhu
+// @version      0.3
+// @license      MIT
+// ==/UserScript==
+
+(function () {
+    'use strict';
+    let nheight = Number(localStorage.getItem("cardHeight")) || 400;
+    let extraPages = Number(localStorage.getItem("extraPages")) || 0;
+    let nmargin = Number(localStorage.getItem("cardMargin")) || 0;
+    let mainDeckList = null;
+    let pagesLoadedText = null;
+    let nextStart = 0;
+    let pagesLoaded = 0;
+    const style = document.createElement("style");
+    document.head.appendChild(style);
+    //Adjust every cards' measurements
+    function applyCardSizing(nheight, cardMargin) {
+        const nwidth = nheight*.7
+        const nfontsize = 10/(400/nheight)
+        const nmottofs = 14/(400/nheight)
+        const npretitlefs = 12/(400/nheight)
+        const trophywidth = 27/(400/nheight)
+        const trophyheight = 24/(400/nheight)
+        const nrarindblock = 8/(400/nheight)
+        const nbadges = 21/(400/nheight)
+        const ns1flagheight = 120/(400/nheight)
+        const ns1desc = 11/(400/nheight)
+        const ns1badges = 36/(400/nheight)
+
+        style.textContent = `
+        .deckcard-container {
+            width: ${nwidth}px !important;
+            height: ${nheight}px !important;
+            margin: ${cardMargin}px !important;
+        }
+        .deckcard {
+            width: ${nwidth}px !important;
+            height: ${nheight}px !important;
+        }
+        .s4-card {
+            width: ${nwidth}px !important;
+            height: ${nheight}px !important;
+        }
+        .s4-card a.title {
+            font-size: ${nfontsize}px !important;
+        }
+        span.motto {
+            font-size: ${nmottofs}px !important;
+        }
+        .s4-card span.pretitle {
+            font-size: ${npretitlefs}px !important;
+        }
+        header {
+            font-size: ${nfontsize}px !important;
+        }
+        footer {
+            font-size: ${nfontsize}px !important;
+        }
+        .trophies-section img {
+            width: ${trophywidth}px !important;
+            height: ${trophyheight}px !important;
+        }
+        .rarity-indicator-block {
+            width: ${nrarindblock}px !important;
+            height: ${nrarindblock}px !important;
+        }
+        span.motto::before {
+            font-size: ${trophyheight}px !important;
+        }
+        span.motto::after {
+            font-size: ${trophyheight}px !important;
+        }
+        .s4-card .lower-info > span {
+            font-size: ${nfontsize}px !important;
+        }
+        .wa_status {
+            height: ${100/(400/nheight)}% !important;
+            font-size: ${90/(400/nheight)}% !important;
+        }
+        .deckcard-badges > *, .s4-card .deckcard-badges .wabadge > img {
+            height: ${nbadges}px !important;
+        }
+        .semimod_status {
+            height: ${100/(400/nheight)}% !important;
+            font-size: ${90/(400/nheight)}% !important;
+        }
+        .mod_status {
+            height: ${100/(400/nheight)}% !important;
+            font-size: ${90/(400/nheight)}% !important;
+        }
+        .lower-info > span > i {
+            font-size: ${nfontsize}px !important;
+        }
+        .deckcard-flag {
+            height: ${ns1flagheight}px !important;
+        }
+        .deckcard-category {
+            font-size: ${npretitlefs}px !important;
+        }
+        .ntype {
+            font-size: ${85/(400/nheight)}% !important;
+        }
+        .nname {
+            font-size: ${110/(400/nheight)}% !important;
+        }
+        .deckcard-season {
+            font-size: ${75/(400/nheight)}% !important;
+        }
+        b {
+            font-size: ${100/(400/nheight)}% !important;
+        }
+        a.rlink {
+            font-size: ${100/(400/nheight)}% !important;
+        }
+        .deckcard-govt {
+            font-size: ${nfontsize}px !important;
+        }
+        .deckcard-desc {
+            font-size: ${ns1desc}px !important;
+        }
+        .deckcard-slogan {
+            font-size: ${ns1desc}px !important;
+        }
+        .deckcard-badges #trophycabinet img.trophy, .deckcard-badges .specialbadges img {
+            max-width: ${ns1badges}px !important;
+        }
+        .s3-slogan {
+            font-size: ${175/(400/nheight)}% !important;
+        }
+        .deckcard-badges img.badge {
+            max-width: ${ns1badges}px !important;
+        }
+        .deckcard-season-2 .deckcard-flag {
+            height: ${248/(400/nheight)}px !important;
+        }
+        .class_status {
+           font-size: ${90/(400/nheight)}% !important;
+        }
+        .deckcard-season-2 .deckcard-lower {
+            height: ${114/(400/nheight)}px !important;
+        }
+        .deckcard-season-3 .deckcard-stripe {
+            line-height: ${1.5/(400/nheight)}em !important;
+        }
+        .deckcard-season-3 .deckcard-info {
+            font-size: ${200/(400/nheight)}% !important;
+        }
+        .s3-lower:after {
+            font-size: ${90/(400/nheight)}% !important;
+        }
+        .s3-lower {
+            font-size: ${125/(400/nheight)}% !important;
+        }
+        .deckcard-season-3 .deckcard-category {
+            font-size: ${0.85/(400/nheight)}em !important;
+        }
+    `;
+    }
+    function sleep(ms) {
+        return new Promise(resolve => setTimeout(resolve, ms));
+    }
+    function initializeDeckList() {
+        const deckLists = document.querySelectorAll(".decklist");
+
+        if (deckLists.length === 0) {
+            console.log("Deck list not found.");
+            return false;
+        }
+
+        // Use the first decklist as the main one
+        mainDeckList = deckLists[0];
+
+        // Merge any additional decklists into the first
+        for (let i = 1; i < deckLists.length; i++) {
+            const cards = deckLists[i].querySelectorAll(".deckcard-container");
+
+            cards.forEach(card => {
+                mainDeckList.appendChild(card);
+            });
+
+            deckLists[i].remove();
+        }
+
+        console.log("Deck list initialized.");
+
+        return true;
+    }
+    function updatePagesLoadedText() {
+            pagesLoadedText.textContent =`Pages Loaded: ${pagesLoaded}/${extraPages}`;
+        }
+    async function loadOnePage(start) {
+        const currentURL = new URL(window.location.href);
+        currentURL.searchParams.set("start", start);
+
+        try {
+            const response = await fetch(currentURL.href);
+            const html = await response.text();
+
+            const parser = new DOMParser();
+            const doc = parser.parseFromString(html, "text/html");
+
+            const newCards = doc.querySelectorAll(".deckcard-container");
+
+            console.log(`Loaded ${newCards.length} cards from start=${start}`);
+
+            newCards.forEach(card => {
+                mainDeckList.appendChild(card);
+
+                $(card).find(".deckcard-info").on("click", function () {
+                    if (!$(this).parents(".deckcard.flipped").length) {
+                        $(this).toggleClass("show");
+                        document.getSelection().removeAllRanges();
+                    }
+                });
+            });
+
+            return true;
+
+        } catch (error) {
+            console.error(`Failed loading page ${start}:`, error);
+            return false;
+        }
+    }
+    function removeExtraCards() {
+        while (pagesLoaded > 0) {
+            for (let i = 0; i < 30; i++) {
+                const lastCard = mainDeckList.lastElementChild;
+                if (lastCard) {
+                    lastCard.remove();
+                }
+            }
+
+            pagesLoaded--;
+            nextStart -= 30;
+            updatePagesLoadedText();
+        }
+    }
+
+    //automatic load
+    async function loadExtraCards(pagesToLoad) {
+        for (let i = 0; i < pagesToLoad; i++) {
+            const success = await loadOnePage(nextStart);
+
+            if (!success) break;
+
+            pagesLoaded++;
+            nextStart += 30;
+            updatePagesLoadedText();
+            if (i + 1 < pagesToLoad) {
+                await sleep(6000);
+            }
+        }
+        console.log("Finished loading extra cards.");
+    }
+    //manual load
+    async function loadNextPage() {
+        if (pagesLoaded >= extraPages) {
+            console.log("All requested pages have already been loaded.");
+            return;
+        }
+
+        const success = await loadOnePage(nextStart);
+
+        if (!success) {
+            return;
+        }
+
+        pagesLoaded++;
+        nextStart += 30;
+        updatePagesLoadedText();
+        console.log(
+            `Loaded ${pagesLoaded} of ${extraPages} extra pages.`
+        );
+    }
+    function menusetup() {
+        //settings button
+        const settingsButton = document.createElement("button");
+        settingsButton.textContent = "⚙";
+        settingsButton.style.position = "absolute";
+        settingsButton.style.right = "10px";
+        settingsButton.style.top = "220px";
+        settingsButton.style.zIndex = "99999";
+        settingsButton.style.width = "40px";
+        settingsButton.style.height = "40px";
+        settingsButton.style.fontSize = "24px";
+        settingsButton.style.color = "black";
+        settingsButton.style.background = "white";
+        settingsButton.style.cursor = "pointer";
+        settingsButton.style.padding = "0";
+        settingsButton.style.border = "none";
+        document.body.appendChild(settingsButton);
+        //menu
+        const menu = document.createElement("div");
+        menu.style.position = "absolute";
+        menu.style.top = "220px";
+        menu.style.right = "50px";
+        menu.style.background = "white";
+        menu.style.border = "1px solid black";
+        menu.style.width = "220px";
+        menu.style.minHeight = "40px";
+        menu.style.padding = "5px";
+        menu.style.fontSize = "16px";
+        menu.style.zIndex = "99999";
+        menu.style.display = "none";
+        menu.style.borderRadius = "8px";
+        menu.style.boxShadow = "0px 4px 12px rgba(0,0,0,0.3)";
+        document.body.appendChild(menu);
+        settingsButton.onclick = () => {
+            menu.style.display =
+                menu.style.display === "none"
+                    ? "block"
+                    : "none";
+        };
+                // Menu title
+        const menuTitle = document.createElement("div");
+        menuTitle.textContent = "Layout Settings";
+        menuTitle.style.fontSize = "16px";
+        menuTitle.style.fontWeight = "bold";
+        menuTitle.style.color = "black";
+        menuTitle.style.textAlign = "left";
+        menuTitle.style.margin = "0 0 5px 0";
+        menu.appendChild(menuTitle);
+
+        // Card height field
+        const heightLabel = document.createElement("div");
+        heightLabel.style.fontSize = "16px";
+        heightLabel.style.color = "black";
+        heightLabel.style.textAlign = "left";
+        heightLabel.style.margin = "0 0 5px 0";
+        heightLabel.textContent = "Card Height (px): ";
+
+        const heightInput = document.createElement("input");
+        heightInput.type = "number";
+        heightInput.value = nheight;
+        heightInput.min = 20;
+        heightInput.max = 400;
+
+        heightLabel.appendChild(heightInput);
+        menu.appendChild(heightLabel);
+
+
+
+
+        // Extra pages field
+        const pagesLabel = document.createElement("div");
+        pagesLabel.style.fontSize = "16px";
+        pagesLabel.style.color = "black";
+        pagesLabel.style.textAlign = "left";
+        pagesLabel.style.margin = "0 0 5px 0";
+        pagesLabel.textContent = "Extra Pages: ";
+        const pagesInput = document.createElement("input");
+        pagesInput.type = "number";
+        pagesInput.value = extraPages;
+        pagesInput.min = 0;
+        pagesInput.max = 40;
+        pagesLabel.appendChild(pagesInput);
+        menu.appendChild(pagesLabel);
+        // Loading mode title
+        const loadingTitle = document.createElement("div");
+        loadingTitle.textContent = "Mode:";
+        loadingTitle.style.marginTop = "10px";
+        loadingTitle.style.color = "black";
+        menu.appendChild(loadingTitle);
+
+        // Automatic mode UI
+        const autoLabel = document.createElement("label");
+        autoLabel.style.color = "black";
+        const autoRadio = document.createElement("input");
+        autoRadio.type = "radio";
+        autoRadio.name = "loadingMode";
+        autoRadio.value = "auto";
+        autoRadio.checked = true;
+        autoRadio.style.color = "black";
+
+        autoLabel.appendChild(autoRadio);
+        autoLabel.append(" Automatic");
+
+        menu.appendChild(autoLabel);
+        menu.appendChild(document.createElement("br"));
+
+        // Manual mode UI
+        const manualLabel = document.createElement("label");
+        manualLabel.style.color = "black";
+        const manualRadio = document.createElement("input");
+        manualRadio.type = "radio";
+        manualRadio.name = "loadingMode";
+        manualRadio.value = "manual";
+        manualRadio.style.color = "black";
+
+        manualLabel.appendChild(manualRadio);
+        manualLabel.append(" Manual");
+
+        menu.appendChild(manualLabel);
+
+        menu.appendChild(document.createElement("br"));
+
+        // Load next page button
+        const loadNextButton = document.createElement("button");
+        loadNextButton.textContent = "Load Next Page";
+        loadNextButton.disabled = true;
+
+        menu.appendChild(loadNextButton);
+        //listeners
+        autoRadio.onchange = () => {
+            loadNextButton.disabled = true;
+        };
+
+        manualRadio.onchange = () => {
+            loadNextButton.disabled = false;
+        };
+        //Pages loaded out of target indicator
+        pagesLoadedText = document.createElement("div");
+        pagesLoadedText.style.marginTop = "8px";
+        pagesLoadedText.style.color = "black";
+        pagesLoadedText.style.fontSize = "14px";
+        pagesLoadedText.textContent = `Pages Loaded: ${pagesLoaded}/${extraPages}`;
+
+        menu.appendChild(pagesLoadedText);
+        //Margin field
+        const marginLabel = document.createElement("div");
+        marginLabel.style.fontSize = "16px";
+        marginLabel.style.color = "black";
+        marginLabel.style.textAlign = "left";
+        marginLabel.style.margin = "0 0 5px 0";
+        marginLabel.textContent = "Card Margin (px): ";
+
+        const marginInput = document.createElement("input");
+        marginInput.type = "number";
+        marginInput.value = nmargin;
+        marginInput.min = 0;
+        marginInput.max = 20;
+
+        marginLabel.appendChild(marginInput);
+        menu.appendChild(marginLabel);
+
+
+        // Apply button
+        const applyButton = document.createElement("button");
+        applyButton.textContent = "Apply";
+
+        menu.appendChild(applyButton);
+        //Credits
+        const creditsText = document.createElement("div");
+        creditsText.textContent = "Script by Tekkhu";
+        creditsText.style.fontSize = "10px";
+        creditsText.style.fontStyle = "italic";
+        creditsText.style.color = "grey";
+        creditsText.style.textAlign = "right";
+        creditsText.style.margin = "0 0 5px 0";
+        menu.appendChild(creditsText);
+
+        // Apply behavior
+        applyButton.onclick = () => {
+            const newHeight = Number(heightInput.value);
+            const newPages = Number(pagesInput.value);
+            const newMargin = Number(marginInput.value);
+            if (newMargin >= 0) {
+                nmargin = newMargin;
+            }
+            if (newHeight > 0) {
+                nheight = newHeight;
+            }
+            applyCardSizing(nheight, nmargin);
+            if (newPages >= 0) {
+                extraPages = newPages;
+                updatePagesLoadedText();
+            }
+            updatePagesLoadedText();
+            const difference = extraPages - pagesLoaded;
+            localStorage.setItem("cardHeight", nheight);
+            localStorage.setItem("extraPages", extraPages);
+            localStorage.setItem("cardMargin", nmargin);
+            console.log(
+                `Applied settings: height=${nheight}, extra pages=${extraPages}`
+            );
+
+
+            if (difference > 0) {
+                if (autoRadio.checked) {
+                    loadExtraCards(difference);
+                }
+            } else if (difference < 0) {
+                removeExtraCards(-difference);
+            }
+        }
+        //Manual button behaivor
+        loadNextButton.onclick = () => {
+            loadNextPage();
+        };
+    }
+    menusetup();
+    initializeDeckList();
+    nextStart =(Number(new URL(window.location.href).searchParams.get("start")) || 0)+ 30;
+    applyCardSizing(nheight, nmargin);
+
+})();
