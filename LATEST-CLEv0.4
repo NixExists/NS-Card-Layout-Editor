@@ -4,7 +4,7 @@
 // @exclude      *card=*
 // @description  Allows you to edit the layout of displayed cards. This is still in beta and can be quite buggy.
 // @author       Tekkhu
-// @version      0.3
+// @version      0.4
 // @license      MIT
 // ==/UserScript==
 
@@ -494,9 +494,23 @@
             loadNextPage();
         };
     }
+    // Detect opening of a pack
+    const lootboxButton = document.querySelector("button.button.lootboxbutton");
+
+    if (lootboxButton) {
+        lootboxButton.addEventListener("click", () => {
+            sessionStorage.setItem("NSCardResizePaused", "true");
+        });
+    }
+
+    // Pause script when opening a pack
+    if (sessionStorage.getItem("NSCardResizePaused") === "true") {
+        console.log("NSCLE paused for pack opening.");
+        sessionStorage.removeItem("NSCardResizePaused");
+        return;
+    }
     menusetup();
     initializeDeckList();
     nextStart =(Number(new URL(window.location.href).searchParams.get("start")) || 0)+ 30;
     applyCardSizing(nheight, nmargin);
-
 })();
